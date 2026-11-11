@@ -8,7 +8,10 @@
 export const EXPLORER_URL = 'https://monadvision.com'
 
 /**
- * Show the maintenance banner at the top of the page.
- * Set to false once the data stream is restored.
+ * Copy for the maintenance banner. The banner is shown only when
+ * NEXT_PUBLIC_SHOW_MAINTENANCE_BANNER is "true".
  */
-export const SHOW_MAINTENANCE_BANNER = true
+export const MAINTENANCE_BANNER_MESSAGE =
+  'The data stream behind this page is down, so live stats are unavailable. We are working to bring it back.'
+export const MAINTENANCE_BANNER_HIGHLIGHT =
+  'This does not affect the Monad network.'

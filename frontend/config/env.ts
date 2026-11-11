@@ -31,6 +31,10 @@ export const publicEnv = {
   get EVENTS_WS_URL() {
     return getEnvOrThrow('NEXT_PUBLIC_EVENTS_WS_URL')
   },
+  /** Defaults to false (banner hidden) unless set to "true". */
+  get SHOW_MAINTENANCE_BANNER() {
+    return process.env.NEXT_PUBLIC_SHOW_MAINTENANCE_BANNER === 'true'
+  },
 }
 
 export { getEnvOrNull, getEnvOrThrow }
