@@ -26,10 +26,25 @@ export const serverEnv = {
 
 /**
  * Public environment variables (exposed to client via NEXT_PUBLIC_ prefix).
+ *
+ * Next.js only inlines NEXT_PUBLIC_ values into the client bundle when they
+ * are read as literal `process.env.NEXT_PUBLIC_*` expressions, so these
+ * getters must not go through `getEnvOrThrow(key)`.
  */
 export const publicEnv = {
-  get EVENTS_WS_URL() {
-    return getEnvOrThrow('NEXT_PUBLIC_EVENTS_WS_URL')
+  /**
+   * Events WebSocket endpoints in priority order: the primary URL, then the
+   * optional fallback.
+   */
+  get EVENTS_WS_URLS(): string[] {
+    const primary = process.env.NEXT_PUBLIC_EVENTS_WS_URL
+    if (!primary) {
+      throw new Error(
+        'Environment variable NEXT_PUBLIC_EVENTS_WS_URL is not set',
+      )
+    }
+    const fallback = process.env.NEXT_PUBLIC_EVENTS_WS_FALLBACK_URL
+    return fallback ? [primary, fallback] : [primary]
   },
   /** Defaults to false (banner hidden) unless set to "true". */
   get SHOW_MAINTENANCE_BANNER() {

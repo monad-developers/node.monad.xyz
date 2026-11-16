@@ -38,6 +38,24 @@ NEXT_PUBLIC_EVENTS_WS_URL="ws://<SERVER_ADDR>:<SERVER_PORT>"
 
 Replace `<SERVER_ADDR>` with your server address and `<SERVER_PORT>` with the port you used in step 1.
 
+#### Optional: fallback endpoint
+
+To keep the dashboard live when the primary backend is down, point the frontend at a second backend:
+
+```
+NEXT_PUBLIC_EVENTS_WS_FALLBACK_URL="wss://<FALLBACK_ADDR>:<FALLBACK_PORT>"
+```
+
+The frontend switches to the other endpoint when the current one:
+
+- does not open within 5 seconds
+- errors or closes
+- stays open but sends no message for 10 seconds (a stalled backend)
+
+It stays on whichever endpoint is working and only tries the other one after the next failure. Each switch waits a random delay of up to 1 second, so clients dropped together by a backend restart don't all reconnect at the same instant. Once both endpoints have failed, that window doubles on each pass, up to 30 seconds. Failover logic lives in `frontend/lib/resilient-websocket.ts`.
+
+The origins of both URLs are added to the `connect-src` Content Security Policy in `frontend/next.config.ts` at build time, so a new endpoint only needs the env var. Rebuild after changing either URL.
+
 ### 3. Run the Frontend
 
 Navigate to the frontend directory and start the development server:
