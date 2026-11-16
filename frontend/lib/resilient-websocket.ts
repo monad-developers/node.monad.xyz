@@ -7,11 +7,12 @@
  * - stays open but delivers no message for `idleTimeoutMs` (a stalled backend)
  *
  * After a failure it stays on the new endpoint until that one fails too, so a
- * healthy fallback is not dropped just to retry the primary. The first failure
- * of each round moves on immediately. Once every endpoint has failed in a row,
- * retries back off exponentially with jitter. The failure count resets on the
- * first message received, not on open, so a server that accepts connections
- * but never sends data still counts as down.
+ * healthy fallback is not dropped just to retry the primary. Every retry waits
+ * a random delay within a window that starts at `baseRetryDelayMs` for the
+ * first pass over the endpoints and doubles on each pass after that, up to
+ * `maxRetryDelayMs`. The failure count resets on the first message received,
+ * not on open, so a server that accepts connections but never sends data still
+ * counts as down.
  */
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed'
@@ -137,16 +138,16 @@ export class ResilientWebSocket {
   }
 
   private retryDelay(): number {
-    // Move to the next endpoint right away until each one has failed once.
-    if (this.consecutiveFailures < this.urls.length) return 0
-
-    const round = Math.floor(this.consecutiveFailures / this.urls.length)
+    // A backend restart drops every client at once. A random delay spreads
+    // them out so they don't all hit the next endpoint at the same instant.
+    // Each endpoint gets one try within the base window, so the switch to the
+    // fallback and the return to the primary use the same window; it doubles
+    // on every pass after that.
+    const pass = Math.floor((this.consecutiveFailures - 1) / this.urls.length)
     const base = this.options.baseRetryDelayMs ?? DEFAULT_BASE_RETRY_DELAY_MS
     const max = this.options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS
-    const capped = Math.min(max, base * 2 ** (round - 1))
-    // Jitter across the upper half of the window keeps many clients from
-    // reconnecting in sync.
-    return Math.round(capped / 2 + Math.random() * (capped / 2))
+    const window = Math.min(max, base * 2 ** pass)
+    return Math.round(Math.random() * window)
   }
 
   private resetIdleTimer(): void {

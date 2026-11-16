@@ -52,7 +52,7 @@ The frontend switches to the other endpoint when the current one:
 - errors or closes
 - stays open but sends no message for 10 seconds (a stalled backend)
 
-It stays on whichever endpoint is working and only tries the other one after the next failure. Once both have failed, retries back off exponentially, up to 30 seconds. Failover logic lives in `frontend/lib/resilient-websocket.ts`.
+It stays on whichever endpoint is working and only tries the other one after the next failure. Each switch waits a random delay of up to 1 second, so clients dropped together by a backend restart don't all reconnect at the same instant. Once both endpoints have failed, that window doubles on each pass, up to 30 seconds. Failover logic lives in `frontend/lib/resilient-websocket.ts`.
 
 The origins of both URLs are added to the `connect-src` Content Security Policy in `frontend/next.config.ts` at build time, so a new endpoint only needs the env var. Rebuild after changing either URL.
 
