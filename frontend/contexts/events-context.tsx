@@ -10,6 +10,8 @@ import {
   useRef,
   useState,
 } from 'react'
+import { publicEnv } from '@/config/env'
+import { ResilientWebSocket } from '@/lib/resilient-websocket'
 import type { EventName, SerializableEventData } from '@/types/events'
 
 interface AccessEntry<T> {
@@ -55,11 +57,10 @@ interface Subscriber {
 
 const EventsContext = createContext<EventsContextValue | null>(null)
 
-const RECONNECT_DELAY = 3000
-
 /**
  * A context provider for the events context.
- * It handles the WebSocket connection and receives events from the server.
+ * It owns the WebSocket connection (with failover to a fallback endpoint, see
+ * `ResilientWebSocket`) and fans out events received from the server.
  * The server uses restricted filters to determine which events to send.
  */
 export function EventsProvider({ children }: EventsProviderProps) {
@@ -70,108 +71,73 @@ export function EventsProvider({ children }: EventsProviderProps) {
     AccessEntry<[string, string]>[]
   >([])
   const [isConnected, setIsConnected] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
   const subscribersRef = useRef<Map<string, Subscriber>>(new Map())
   const tpsSubscribersRef = useRef<Map<string, (tps: number) => void>>(
     new Map(),
   )
 
-  useEffect(() => {
-    let ws: WebSocket | null = null
-    let reconnectTimeout: NodeJS.Timeout | null = null
-
-    const connect = () => {
-      try {
-        const url = process.env.NEXT_PUBLIC_EVENTS_WS_URL
-
-        if (!url) {
-          throw new Error('NEXT_PUBLIC_EVENTS_WS_URL is not set')
-        }
-
-        ws = new WebSocket(url)
-        wsRef.current = ws
-
-        ws.onopen = () => {
-          setIsConnected(true)
-        }
-
-        ws.onmessage = (event) => {
-          // Browsers don't throttle WebSocket onmessage in background tabs, but
-          // the heavy downstream work (setState fan-out, viem.decodeEventLog)
-          // still allocates aggressively. Dropping messages while hidden keeps
-          // the JS heap from blowing up during long backgrounded sessions.
-          if (
-            typeof document !== 'undefined' &&
-            document.visibilityState === 'hidden'
-          ) {
-            return
-          }
-
-          try {
-            const message: ServerMessage = JSON.parse(event.data)
-
-            if (message.TopAccesses) {
-              setAccountAccesses(message.TopAccesses.account)
-              setStorageAccesses(message.TopAccesses.storage)
-            }
-
-            if (typeof message.TPS === 'number') {
-              const tps = message.TPS
-              tpsSubscribersRef.current.forEach((callback) => {
-                callback(tps)
-              })
-            }
-
-            if (message.Events && message.Events.length > 0) {
-              const newEvents = message.Events
-              const subscribers = subscribersRef.current
-
-              for (const evt of newEvents) {
-                const eventType = evt.payload.type as EventName
-                subscribers.forEach((sub) => {
-                  if (
-                    sub.eventTypes === null ||
-                    sub.eventTypes.has(eventType)
-                  ) {
-                    sub.callback(evt)
-                  }
-                })
-              }
-            }
-          } catch (error) {
-            console.error('Failed to parse message:', error)
-          }
-        }
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-        }
-
-        ws.onclose = () => {
-          setIsConnected(false)
-          wsRef.current = null
-
-          reconnectTimeout = setTimeout(() => {
-            connect()
-          }, RECONNECT_DELAY)
-        }
-      } catch (error) {
-        console.error('Failed to connect:', error)
-        reconnectTimeout = setTimeout(() => {
-          connect()
-        }, RECONNECT_DELAY)
-      }
+  const handleMessage = useCallback((event: MessageEvent) => {
+    // Browsers don't throttle WebSocket onmessage in background tabs, but
+    // the heavy downstream work (setState fan-out, viem.decodeEventLog)
+    // still allocates aggressively. Dropping messages while hidden keeps
+    // the JS heap from blowing up during long backgrounded sessions.
+    if (
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'hidden'
+    ) {
+      return
     }
 
-    connect()
+    try {
+      const message: ServerMessage = JSON.parse(event.data)
+
+      if (message.TopAccesses) {
+        setAccountAccesses(message.TopAccesses.account)
+        setStorageAccesses(message.TopAccesses.storage)
+      }
+
+      if (typeof message.TPS === 'number') {
+        const tps = message.TPS
+        tpsSubscribersRef.current.forEach((callback) => {
+          callback(tps)
+        })
+      }
+
+      if (message.Events && message.Events.length > 0) {
+        const newEvents = message.Events
+        const subscribers = subscribersRef.current
+
+        for (const evt of newEvents) {
+          const eventType = evt.payload.type as EventName
+          subscribers.forEach((sub) => {
+            if (sub.eventTypes === null || sub.eventTypes.has(eventType)) {
+              sub.callback(evt)
+            }
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Failed to parse message:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    let socket: ResilientWebSocket | null = null
+
+    try {
+      socket = new ResilientWebSocket({
+        urls: publicEnv.EVENTS_WS_URLS,
+        onStatusChange: (status) => {
+          setIsConnected(status === 'open')
+        },
+        onMessage: handleMessage,
+      })
+    } catch (error) {
+      console.error('Failed to connect:', error)
+    }
 
     return () => {
-      if (reconnectTimeout) {
-        clearTimeout(reconnectTimeout)
-      }
-      if (ws) {
-        ws.close()
-      }
+      socket?.close()
     }
   }, [])
 
